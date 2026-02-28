@@ -1,60 +1,39 @@
-import time
-import board
-import busio
+##########################################
+# MLX90640 Thermal Camera w Raspberry Pi
+# -- 2Hz Sampling with Simple Routine
+##########################################
+#
+import time,board,busio
 import numpy as np
 import adafruit_mlx90640
 import matplotlib.pyplot as plt
 
-def initialize_sensor():
-    i2c = busio.I2C(board.SCL, board.SDA)
-    mlx = adafruit_mlx90640.MLX90640(i2c)
-    mlx.refresh_rate = adafruit_mlx90640.RefreshRate.REFRESH_4_HZ
-    return mlx
+i2c = busio.I2C(board.SCL, board.SDA, frequency=400000) # setup I2C
+mlx = adafruit_mlx90640.MLX90640(i2c) # begin MLX90640 with I2C comm
+mlx.refresh_rate = adafruit_mlx90640.RefreshRate.REFRESH_8_HZ # set refresh rate
+mlx_shape = (24,32)
 
-def setup_plot():
-    plt.ion()
-    fig, ax = plt.subplots(figsize=(12, 7))
-    therm1 = ax.imshow(np.zeros((24, 32)), vmin=0, vmax=60, cmap='inferno', interpolation='bilinear')
-    cbar = fig.colorbar(therm1)
-    cbar.set_label('Temperature [°C]', fontsize=14)
-    plt.title('Thermal Image')
-    return fig, ax, therm1
+# setup the figure for plotting
+plt.ion() # enables interactive plotting
+fig,ax = plt.subplots(figsize=(12,7))
+therm1 = ax.imshow(np.zeros(mlx_shape),vmin=0,vmax=60) #start plot with zeros
+cbar = fig.colorbar(therm1) # setup colorbar for temps
+cbar.set_label('Temperature [$^{\circ}$C]',fontsize=14) # colorbar label
 
-def update_display(fig, ax, therm1, data_array):
-    therm1.set_data(np.fliplr(data_array))
-    therm1.set_clim(vmin=np.min(data_array), vmax=np.max(data_array))
-    ax.draw_artist(ax.patch)
-    ax.draw_artist(therm1)
-    fig.canvas.update()
-    fig.canvas.flush_events()
-
-def main():
-    mlx = initialize_sensor()
-    fig, ax, therm1 = setup_plot()
-    
-    frame = np.zeros((24*32,))
-    t_array = []
-    max_retries = 5
-
-    while True:
-        t1 = time.monotonic()
-        retry_count = 0
-        while retry_count < max_retries:
-            try:
-                mlx.getFrame(frame)
-                data_array = np.reshape(frame, (24, 32))
-                update_display(fig, ax, therm1, data_array)
-                plt.pause(0.001)
-                t_array.append(time.monotonic() - t1)
-                print('Sample Rate: {0:2.1f}fps'.format(len(t_array) / np.sum(t_array)))
-                break
-            except ValueError:
-                retry_count += 1
-            except RuntimeError as e:
-                retry_count += 1
-                if retry_count >= max_retries:
-                    print(f"Failed after {max_retries} retries with error: {e}")
-                    break
-
-if __name__ == '__main__':
-    main()
+frame = np.zeros((24*32,)) # setup array for storing all 768 temperatures
+t_array = []
+while True:
+    t1 = time.monotonic()
+    try:
+        mlx.getFrame(frame) # read MLX temperatures into frame var
+        data_array = (np.reshape(frame,mlx_shape)) # reshape to 24x32
+        therm1.set_data(np.fliplr(data_array)) # flip left to right
+        therm1.set_clim(vmin=np.min(data_array),vmax=np.max(data_array)) # set bounds
+        cbar.on_mappable_changed(therm1) # update colorbar range
+        plt.pause(0.001) # required
+        fig.savefig('mlx90640_test_fliplr.png',dpi=300,facecolor='#FCFCFC',
+                    bbox_inches='tight') # comment out to speed up
+        t_array.append(time.monotonic()-t1)
+        print('Sample Rate: {0:2.1f}fps'.format(len(t_array)/np.sum(t_array)))
+    except ValueError:
+        continue # if error, just read again
